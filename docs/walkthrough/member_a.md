@@ -1,6 +1,6 @@
 # 成员 A 基础实现讲解
 
-本文对应 A-B01 至 A-B06 及文末 A-E01 至 A-E03。源码文件和测试快照哈希在 `delivery/member_a.json`，实际命令与结果在 `delivery/validation.txt`。这是代码讲解材料，不能代替本人理解验收。
+本文对应 A-B01 至 A-B06 及文末 A-E01 至 A-E10。源码文件和测试快照哈希在 `delivery/member_a.json`，实际命令与结果在 `delivery/validation.txt`。这是代码讲解材料，不能代替本人理解验收。
 
 ## 总体数据流与文件边界
 
@@ -156,3 +156,47 @@ OR
 关键测试：`test_a_e03_distinct_projection`、`test_a_e03_distinct_star`、`test_a_e03_double_distinct`、`test_a_e03_core_unchanged` 对应四个任务卡用例；`test_a_e03_duplicate_projection_not_deduplicated` 保留语法证据；`test_a_e03_mixed_batch_trace` 验证混合批次只发一次 TOKEN/AST；`test_a_e03_demo_real_process_and_default_disabled` 验证可运行演示。
 
 本人练习：用 `(a,b)=(1,2),(1,3)` 说明整元组去重与分别对 a/b 去重的区别，再追踪有 WHERE 的 DISTINCT payload。本人理解状态待完成。
+
+## A-E04 JOIN 别名和限定列
+
+`parse_select` 在当前语句内发现 JOIN 触发词后进入 `parse_join`。`parse_table_ref` 保存真实表名和引用别名；没有别名时复制表名作为引用名。`parse_column_ref` 把 `s.id` 编码为 `QualifiedIdentifier`，其中 qualifier 与 name 均保留，整体 Span 覆盖点号两侧。ON 与 WHERE 分别调用表达式入口，不能互相覆盖。v1 固定一段 INNER JOIN；LEFT、RIGHT、OUTER 和第三张表会明确报错。
+
+`test_a_e04_join_payload` 追踪投影和 ON 两侧限定名；`test_a_e04_missing_on` 在分号处断言期望 ON；`test_a_e04_defaults_alias_and_preserves_duplicate_aliases` 证明 A 不替 B 判断重复引用名。
+
+## A-E05 GROUP BY 与聚合
+
+`parse_select_item` 区分普通列和 COUNT、SUM、AVG、MIN、MAX。每项保存 function、column、alias，投影顺序由 select_items 列表保留。COUNT(*) 把参数保存为 `"*"`，其他函数遇星号立即报 `INVALID_AGGREGATE_ARGUMENT`。`parse_aggregate` 先解析 WHERE，再解析 GROUP BY，保留重复分组列且不检查“普通列必须在分组中”等语义。
+
+`test_a_e05_group_payload` 和 `test_a_e05_global_aggregate` 验证分组与全局聚合；`test_a_e05_semantic_deferred` 证明非法分组语义仍完整交给 B。
+
+## A-E06 更多类型和字面量
+
+`parse_column_def` 在 types 开关下接受 FLOAT、BOOL 类型名。`parse_literal` 将 TRUE、FALSE、NULL 分别保存为 JSON 的 true、false、null，并先区分 bool，避免 Python 中 bool 是 int 子类造成混淆。只有实际使用新类型或新字面量时才由 `_wrap_detected_extension` 包装 `{statement}`；字符串 `'FALSE'` 仍是普通字符串，单纯启用开关不会改变核心语句产物。
+
+`test_a_e06_literal_values` 检查三种 JSON 值；`test_a_e06_keyword_case_and_quoted_false` 对比关键字大小写和字符串；`test_a_e06_unknown_type` 保留 MONEY 的真实位置。
+
+## A-E07 算术表达式
+
+算术入口依次为 `parse_additive → parse_multiplicative → parse_unary → parse_primary`。加减和乘除各自用循环把右项接到已有左树，因此同级左结合；一元正负递归包裹操作数。比较层读取完整 additive，NOT 再包裹完整比较，所以 `NOT id=-2*3` 的根是 NOT，内部依次为比较、乘法和一元负号。Parser 不计算常量，也不判断除零。
+
+`test_a_e07_precedence` 验证乘法优先；`test_a_e07_division_left_associative_and_parentheses` 对比 `8/2/2` 与 `8/(2/2)`；`test_a_e07_missing_rhs` 校验分号位置。
+
+## A-E08 Panic Mode 恢复
+
+核心 `Frontend.parse` 保持首错停止。独立的 `parse_recovering` 返回 RecoveryResult，成功项和诊断都带原 statement_index。`Parser.synchronize` 在当前分号处只消费该分号；若错误位于语句内部，则至少消费一个 Token 并继续到下一分号，保证循环前进。max_errors 达到上限时设置 truncated。词法阶段的未闭合字符串无法可靠寻找边界，因此返回一条诊断并停止。
+
+`test_a_e08_recover_next` 和 `test_a_e08_consecutive_errors` 验证原序号；`test_a_e08_error_limit_and_lexical_stop` 验证截断；`test_a_e08_does_not_swallow_internal_errors` 证明内部 RuntimeError 不会伪装成用户语法错误。
+
+## A-E09 FIRST FOLLOW 与预测表
+
+`grammar_analysis.py` 用产生式映射作为输入，epsilon 使用独立常量 `ε`，EOF 使用 `EOF`。nullable、FIRST、FOLLOW 都从有限空集合开始反复传播，直到一轮不再变化，因此循环产生式也会终止。预测表先用右部 FIRST 填充；右部可空时再用左部 FOLLOW。一个单元出现多条不同产生式时保留全部并生成 LL1Conflict，不能后写覆盖。
+
+`test_a_e09_nullable_first`、`test_a_e09_follow` 手算小文法；`test_a_e09_table` 验证 epsilon 产生式；`test_a_e09_conflict` 检查 M[S,a] 的两条竞争产生式。
+
+## A-E10 SQL Fuzz 与缩减
+
+`tests/frontend/fuzz_support.py` 使用局部 `random.Random(seed)`，不会污染全局随机状态。`generate_valid` 按独立小文法同时生成 SQL、预期语句类型和摘要，测试不能拿 Parser 自己的输出当唯一真值。`mutate_invalid` 提供删除必需 FROM 和删除闭引号两种保证非法的变异。`record_failure` 区分 Crash、Wrong Accept、Wrong Reject，并保存种子、完整 SQL、异常类型和重放命令。`minimize` 只接受仍满足同一谓词的字符删除，结果确定。
+
+`test_a_e10_reproducible` 用 seed=2026 生成 200 条 SQL 并逐条校验；`test_a_e10_minimizer` 把 `xxBADyy` 缩成 `BAD`；`test_a_e10_failure_record` 注入 RuntimeError 并验证重放仍得到相同记录。
+
+本人练习：画出一条 JOIN 的限定列绑定输入，手算聚合 payload、`8/2/2` 的树、示例文法的 FIRST/FOLLOW，并解释恢复同步为什么必须前进。个人口述和现场修改仍需本人完成。

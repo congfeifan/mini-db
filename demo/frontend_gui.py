@@ -21,6 +21,10 @@ SELECT name, age FROM student WHERE age >= 18;
 EXTENSION_EXAMPLE = """UPDATE student SET age = 19 WHERE id = 1;
 SELECT name FROM student WHERE age >= 18 ORDER BY name DESC LIMIT 10;
 SELECT DISTINCT age FROM student;
+SELECT s.id,c.name FROM student AS s JOIN class c ON s.cid=c.id;
+SELECT age,COUNT(*) AS n FROM student GROUP BY age;
+CREATE TABLE metrics(value FLOAT,active BOOL);
+SELECT * FROM student WHERE score>10+2*4;
 """
 
 
@@ -93,6 +97,10 @@ class FrontendGui:
             "update": tk.BooleanVar(value=False),
             "order_limit": tk.BooleanVar(value=False),
             "distinct": tk.BooleanVar(value=False),
+            "join": tk.BooleanVar(value=False),
+            "aggregate": tk.BooleanVar(value=False),
+            "types": tk.BooleanVar(value=False),
+            "arithmetic": tk.BooleanVar(value=False),
         }
         self.status_var = tk.StringVar(value="请输入 SQL，按 F5 或 Ctrl+Enter 开始解析。")
         self._build_widgets()
@@ -113,7 +121,7 @@ class FrontendGui:
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(3, weight=1)
+        main.rowconfigure(4, weight=1)
 
         ttk.Label(main, text="MiniDB SQL 前端演示", style="Title.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 8)
@@ -148,15 +156,19 @@ class FrontendGui:
         ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(controls, text="清空", command=self.clear).pack(side=tk.LEFT, padx=(8, 18))
 
-        ttk.Label(controls, text="启用拓展：").pack(side=tk.LEFT)
-        ttk.Checkbutton(controls, text="UPDATE", variable=self.extension_vars["update"]).pack(side=tk.LEFT)
-        ttk.Checkbutton(
-            controls, text="ORDER BY / LIMIT", variable=self.extension_vars["order_limit"]
-        ).pack(side=tk.LEFT)
-        ttk.Checkbutton(controls, text="DISTINCT", variable=self.extension_vars["distinct"]).pack(side=tk.LEFT)
+        extension_bar = ttk.Frame(main)
+        extension_bar.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(extension_bar, text="启用拓展：").pack(side=tk.LEFT)
+        labels = {
+            "update": "UPDATE", "order_limit": "ORDER/LIMIT", "distinct": "DISTINCT",
+            "join": "JOIN", "aggregate": "聚合", "types": "类型", "arithmetic": "算术",
+        }
+        for name, label in labels.items():
+            ttk.Checkbutton(extension_bar, text=label,
+                            variable=self.extension_vars[name]).pack(side=tk.LEFT, padx=(0, 6))
 
         self.notebook = ttk.Notebook(main)
-        self.notebook.grid(row=3, column=0, sticky="nsew")
+        self.notebook.grid(row=4, column=0, sticky="nsew")
         self.outputs = {}
         for key, title in (("token", "Token"), ("ast", "AST"), ("error", "错误信息")):
             output = scrolledtext.ScrolledText(
@@ -169,7 +181,7 @@ class FrontendGui:
             self.outputs[key] = output
 
         ttk.Label(main, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=4, column=0, sticky="w", pady=(8, 0)
+            row=5, column=0, sticky="w", pady=(8, 0)
         )
 
     def _set_output(self, name: str, value: str) -> None:

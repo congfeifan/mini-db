@@ -1,0 +1,15 @@
+{
+  "feature": "types",
+  "version": 1,
+  "payload_fields": ["statement"],
+  "column_types": ["FLOAT", "BOOL"],
+  "literals": ["TRUE", "FALSE", "NULL"],
+  "valid_examples": [
+    {"sql": "CREATE TABLE t(x FLOAT,ok BOOL);", "expected_types": ["FLOAT", "BOOL"]},
+    {"sql": "INSERT INTO t VALUES(3.14,TRUE,NULL);", "expected_values": [3.14, true, null]}
+  ],
+  "invalid_examples": [
+    {"sql": "CREATE TABLE t(x MONEY);", "code": "UNEXPECTED_TOKEN", "unexpected": "MONEY"},
+    {"sql": "INSERT INTO t VALUES(TRUE);", "without_flag_code": "EXTENSION_DISABLED", "unexpected": "TRUE"}
+  ]
+}

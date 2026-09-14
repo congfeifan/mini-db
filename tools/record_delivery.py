@@ -51,6 +51,13 @@ def record_delivery(root: Path) -> None:
         "A-E01": ["Parser.parse_update", "Parser.parse_assignment", "ExtensionStatement"],
         "A-E02": ["Parser.parse_query_suffix", "Parser.parse_order_terms", "Parser.parse_limit"],
         "A-E03": ["Parser.parse_select", "Parser._require_extension"],
+        "A-E04": ["Parser.parse_table_ref", "Parser.parse_join", "Parser.parse_column_ref"],
+        "A-E05": ["Parser.parse_select_item", "Parser.parse_aggregate"],
+        "A-E06": ["Parser.parse_column_def", "Parser.parse_literal", "Parser._wrap_detected_extension"],
+        "A-E07": ["Parser.parse_additive", "Parser.parse_multiplicative", "Parser.parse_unary"],
+        "A-E08": ["Frontend.parse_recovering", "Parser.parse_recovering", "Parser.synchronize"],
+        "A-E09": ["analyze_grammar", "compute_nullable", "compute_first", "compute_follow", "build_table"],
+        "A-E10": ["generate_valid", "mutate_invalid", "minimize", "record_failure"],
     }
     extension_delivery = {
         "A-E01": {"feature": "update", "version": 1, "group": "EXT_UPDATE",
@@ -59,6 +66,20 @@ def record_delivery(root: Path) -> None:
                   "execution_dependencies": ["B-E05", "D-E03"]},
         "A-E03": {"feature": "distinct", "version": 1, "group": "EXT_DISTINCT",
                   "execution_dependencies": ["另行定义B去重计划和D去重算子；现有任务未覆盖"]},
+        "A-E04": {"feature": "join", "version": 1, "group": "EXT_JOIN",
+                  "execution_dependencies": ["B-E06", "D-E05"]},
+        "A-E05": {"feature": "aggregate", "version": 1, "group": "EXT_AGGREGATE",
+                  "execution_dependencies": ["B-E07", "D-E04"]},
+        "A-E06": {"feature": "types", "version": 1, "group": "EXT_TYPES",
+                  "execution_dependencies": ["B-E08", "C编码升级", "D求值扩展"]},
+        "A-E07": {"feature": "arithmetic", "version": 1, "group": "EXT_ARITHMETIC",
+                  "execution_dependencies": ["B-E03", "D求值扩展"]},
+        "A-E08": {"feature": "error_recovery", "version": 1,
+                  "group": "EXT_ERROR_RECOVERY", "execution_dependencies": []},
+        "A-E09": {"feature": "grammar_tooling", "version": 1,
+                  "group": "EXT_GRAMMAR_TOOLING", "execution_dependencies": []},
+        "A-E10": {"feature": "fuzzing", "version": 1,
+                  "group": "EXT_FUZZING", "execution_dependencies": []},
     }
     files = sorted(p for folder in ("minidb", "tests", "demo", "tools")
                    for p in (root / folder).rglob("*.py"))
@@ -113,6 +134,8 @@ def record_delivery(root: Path) -> None:
         "limits": ["只完成 SQL 前端，没有 B/C/D 或数据库执行、持久化验收",
                    "括号嵌套上限64，超过时报SYNTAX/NESTING_LIMIT",
                    "超出有限float范围的小数字面量报LEXICAL/INVALID_NUMBER",
+                   "JOIN v1 只支持两表 INNER JOIN；扩展 v1 不支持同句任意组合",
+                   "恢复入口只提供诊断，不授权执行错误脚本中的剩余语句",
                    "个人口述、Debug、现场修改待本人完成；未运行Linux验收"],
         "git_commit_or_push_performed": _git_commit_exists(root),
     }

@@ -25,6 +25,9 @@ def main() -> int:
         (["-m", "demo.frontend_demo", "--file", "demo/core.sql"], 0),
         (["-m", "demo.frontend_demo", "--file", "demo/extensions.sql", "--enable", "update",
           "--enable", "order_limit", "--enable", "distinct"], 0),
+        (["-m", "demo.frontend_demo", "--file", "demo/remaining_extensions.sql",
+          "--enable", "join", "--enable", "aggregate", "--enable", "types",
+          "--enable", "arithmetic"], 0),
         (["-m", "demo.frontend_demo", "--file", "demo/extensions.sql"], 1),
         (["-m", "demo.frontend_demo", "--file", "demo/errors.sql"], 1),
     ]

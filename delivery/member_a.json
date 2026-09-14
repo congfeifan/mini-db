@@ -2,7 +2,7 @@
   "schema_version": 1,
   "member": "A",
   "feature_group": "CORE_FRONTEND",
-  "generated_at": "2026-09-14T15:44:33.383739+08:00",
+  "generated_at": "2026-09-14T19:11:54.047030+08:00",
   "completed_tasks": [
     "A-B01",
     "A-B02",
@@ -12,12 +12,26 @@
     "A-B06",
     "A-E01",
     "A-E02",
-    "A-E03"
+    "A-E03",
+    "A-E04",
+    "A-E05",
+    "A-E06",
+    "A-E07",
+    "A-E08",
+    "A-E09",
+    "A-E10"
   ],
   "completed_extensions": [
     "A-E01",
     "A-E02",
-    "A-E03"
+    "A-E03",
+    "A-E04",
+    "A-E05",
+    "A-E06",
+    "A-E07",
+    "A-E08",
+    "A-E09",
+    "A-E10"
   ],
   "extensions": {
     "A-E01": {
@@ -46,6 +60,61 @@
       "execution_dependencies": [
         "另行定义B去重计划和D去重算子；现有任务未覆盖"
       ]
+    },
+    "A-E04": {
+      "feature": "join",
+      "version": 1,
+      "group": "EXT_JOIN",
+      "execution_dependencies": [
+        "B-E06",
+        "D-E05"
+      ]
+    },
+    "A-E05": {
+      "feature": "aggregate",
+      "version": 1,
+      "group": "EXT_AGGREGATE",
+      "execution_dependencies": [
+        "B-E07",
+        "D-E04"
+      ]
+    },
+    "A-E06": {
+      "feature": "types",
+      "version": 1,
+      "group": "EXT_TYPES",
+      "execution_dependencies": [
+        "B-E08",
+        "C编码升级",
+        "D求值扩展"
+      ]
+    },
+    "A-E07": {
+      "feature": "arithmetic",
+      "version": 1,
+      "group": "EXT_ARITHMETIC",
+      "execution_dependencies": [
+        "B-E03",
+        "D求值扩展"
+      ]
+    },
+    "A-E08": {
+      "feature": "error_recovery",
+      "version": 1,
+      "group": "EXT_ERROR_RECOVERY",
+      "execution_dependencies": []
+    },
+    "A-E09": {
+      "feature": "grammar_tooling",
+      "version": 1,
+      "group": "EXT_GRAMMAR_TOOLING",
+      "execution_dependencies": []
+    },
+    "A-E10": {
+      "feature": "fuzzing",
+      "version": 1,
+      "group": "EXT_FUZZING",
+      "execution_dependencies": []
     }
   },
   "extensions_enabled_by_default": [],
@@ -80,7 +149,7 @@
     "runtime_dependencies": "standard library only"
   },
   "tests": {
-    "passed": 187,
+    "passed": 228,
     "failed": 0,
     "skipped": 0,
     "junit": "delivery/test-results.xml",
@@ -394,6 +463,147 @@
         "test_a_e03_snapshot_examples",
         "test_a_e03_demo_real_process_and_default_disabled"
       ]
+    },
+    {
+      "id": "A-E04",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "Parser.parse_table_ref",
+        "Parser.parse_join",
+        "Parser.parse_column_ref"
+      ],
+      "test_file": "tests/frontend/test_a_e04.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e04_join_payload",
+        "test_a_e04_join_where",
+        "test_a_e04_missing_on",
+        "test_a_e04_reject_outer_join",
+        "test_a_e04_defaults_alias_and_preserves_duplicate_aliases",
+        "test_a_e04_disabled_and_core_unchanged"
+      ]
+    },
+    {
+      "id": "A-E05",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "Parser.parse_select_item",
+        "Parser.parse_aggregate"
+      ],
+      "test_file": "tests/frontend/test_a_e05.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e05_group_payload",
+        "test_a_e05_global_aggregate",
+        "test_a_e05_bad_star",
+        "test_a_e05_semantic_deferred",
+        "test_a_e05_multiple_items_aliases_preserve_order",
+        "test_a_e05_disabled_and_plain_select_unchanged"
+      ]
+    },
+    {
+      "id": "A-E06",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "Parser.parse_column_def",
+        "Parser.parse_literal",
+        "Parser._wrap_detected_extension"
+      ],
+      "test_file": "tests/frontend/test_a_e06.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e06_types_create",
+        "test_a_e06_literal_values",
+        "test_a_e06_string_unchanged",
+        "test_a_e06_unknown_type",
+        "test_a_e06_keyword_case_and_quoted_false",
+        "test_a_e06_boolean_where_is_wrapped"
+      ]
+    },
+    {
+      "id": "A-E07",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "Parser.parse_additive",
+        "Parser.parse_multiplicative",
+        "Parser.parse_unary"
+      ],
+      "test_file": "tests/frontend/test_a_e07.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e07_precedence",
+        "test_a_e07_left_associative",
+        "test_a_e07_unary_and_not",
+        "test_a_e07_missing_rhs",
+        "test_a_e07_division_left_associative_and_parentheses",
+        "test_a_e07_core_mode_still_rejects_arithmetic"
+      ]
+    },
+    {
+      "id": "A-E08",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "Frontend.parse_recovering",
+        "Parser.parse_recovering",
+        "Parser.synchronize"
+      ],
+      "test_file": "tests/frontend/test_a_e08.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e08_recover_next",
+        "test_a_e08_consecutive_errors",
+        "test_a_e08_eof_error",
+        "test_a_e08_core_unchanged",
+        "test_a_e08_error_limit_and_lexical_stop",
+        "test_a_e08_does_not_swallow_internal_errors"
+      ]
+    },
+    {
+      "id": "A-E09",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "analyze_grammar",
+        "compute_nullable",
+        "compute_first",
+        "compute_follow",
+        "build_table"
+      ],
+      "test_file": "tests/frontend/test_a_e09.py",
+      "test_count": 5,
+      "tests": [
+        "test_a_e09_nullable_first",
+        "test_a_e09_follow",
+        "test_a_e09_table",
+        "test_a_e09_conflict",
+        "test_a_e09_nullable_suffix_and_stable_output"
+      ]
+    },
+    {
+      "id": "A-E10",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "generate_valid",
+        "mutate_invalid",
+        "minimize",
+        "record_failure"
+      ],
+      "test_file": "tests/frontend/test_a_e10.py",
+      "test_count": 6,
+      "tests": [
+        "test_a_e10_reproducible",
+        "test_a_e10_invalid_mutation",
+        "test_a_e10_minimizer",
+        "test_a_e10_failure_record",
+        "test_a_e10_wrong_accept_and_reject_categories",
+        "test_a_e10_keyword_case_equivalence_preserves_lexeme"
+      ]
     }
   ],
   "created_files": [
@@ -406,11 +616,19 @@
     "demo/extensions.sql",
     "demo/frontend_demo.py",
     "demo/frontend_gui.py",
+    "demo/remaining_extensions.sql",
     "docs/INTERFACES.md",
     "docs/extensions/README.md",
     "docs/extensions/contracts.core-v1.sha256",
+    "docs/extensions/frontend_aggregate_v1.json",
+    "docs/extensions/frontend_arithmetic_v1.json",
     "docs/extensions/frontend_distinct_v1.json",
+    "docs/extensions/frontend_fuzz_v1.json",
+    "docs/extensions/frontend_join_v1.json",
+    "docs/extensions/frontend_ll1_v1.json",
     "docs/extensions/frontend_order_limit_v1.json",
+    "docs/extensions/frontend_recovery_v1.json",
+    "docs/extensions/frontend_types_v1.json",
     "docs/extensions/frontend_update_v1.json",
     "docs/grammar.md",
     "docs/walkthrough/member_a.md",
@@ -425,6 +643,7 @@
     "minidb/contracts/tokens.py",
     "minidb/frontend/__init__.py",
     "minidb/frontend/formatter.py",
+    "minidb/frontend/grammar_analysis.py",
     "minidb/frontend/lexer.py",
     "minidb/frontend/parser.py",
     "pyproject.toml",
@@ -432,6 +651,7 @@
     "tests/contracts/__init__.py",
     "tests/contracts/test_frontend_contracts.py",
     "tests/frontend/__init__.py",
+    "tests/frontend/fuzz_support.py",
     "tests/frontend/helpers.py",
     "tests/frontend/test_a_b01.py",
     "tests/frontend/test_a_b02.py",
@@ -442,6 +662,13 @@
     "tests/frontend/test_a_e01.py",
     "tests/frontend/test_a_e02.py",
     "tests/frontend/test_a_e03.py",
+    "tests/frontend/test_a_e04.py",
+    "tests/frontend/test_a_e05.py",
+    "tests/frontend/test_a_e06.py",
+    "tests/frontend/test_a_e07.py",
+    "tests/frontend/test_a_e08.py",
+    "tests/frontend/test_a_e09.py",
+    "tests/frontend/test_a_e10.py",
     "tests/frontend/test_frontend_gui.py",
     "tools/record_delivery.py",
     "tools/validate_frontend.py"
@@ -470,12 +697,14 @@
   ],
   "walkthrough": "docs/walkthrough/member_a.md",
   "source_manifest": "delivery/source.sha256",
-  "source_snapshot_sha256": "88ec5b244f1ccb267fb5ec7c5c6728ed14c850b9a9a91eb8f1fc93cb3b8959f6",
+  "source_snapshot_sha256": "07f8676df9ed97cbf12e24a95d3357786b9675e9c15a3c40eae823c1e8c288ba",
   "handoff": "复制此完整源码项目到最终 _integration_input/member_a，排除 .venv 和缓存；整合前统一公共契约。",
   "limits": [
     "只完成 SQL 前端，没有 B/C/D 或数据库执行、持久化验收",
     "括号嵌套上限64，超过时报SYNTAX/NESTING_LIMIT",
     "超出有限float范围的小数字面量报LEXICAL/INVALID_NUMBER",
+    "JOIN v1 只支持两表 INNER JOIN；扩展 v1 不支持同句任意组合",
+    "恢复入口只提供诊断，不授权执行错误脚本中的剩余语句",
     "个人口述、Debug、现场修改待本人完成；未运行Linux验收"
   ],
   "git_commit_or_push_performed": true

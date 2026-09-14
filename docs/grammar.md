@@ -23,6 +23,30 @@ literal    = INTEGER | "-" INTEGER | STRING | FLOAT
 name       = IDENTIFIER
 ```
 
+## 扩展文法
+
+显式开启扩展后，另支持以下前端文法。每个 v1 扩展独立包装；未定义的同句组合会拒绝，而不会丢失其中一项含义。
+
+```ebnf
+join_select = SELECT column_refs FROM table_ref [INNER] JOIN table_ref ON expr [WHERE expr]
+table_ref   = name [[AS] name]
+column_ref  = name | name "." name
+
+aggregate   = SELECT select_item {"," select_item} FROM name [WHERE expr] [GROUP BY names]
+select_item = name [AS name] | aggregate_function "(" (name | "*") ")" [AS name]
+aggregate_function = COUNT | SUM | AVG | MIN | MAX
+
+extended_type    = FLOAT | BOOL
+extended_literal = TRUE | FALSE | NULL
+
+comparison     = additive [comp_op additive]
+additive       = multiplicative {("+" | "-") multiplicative}
+multiplicative = unary {("*" | "/") unary}
+unary          = ("+" | "-") unary | primary
+```
+
+只有 `COUNT(*)` 接受星号参数。JOIN v1 固定为两表 INNER JOIN。`parse_recovering` 在语法错误后同步到下一分号；核心 `parse` 仍在首个错误停止。
+
 ## 词法规则
 
 - 标识符为 `[A-Za-z_][A-Za-z0-9_]*`，最多 64 个字符。原文保存在 lexeme，value/name 为小写。关键字也以 casefold 规范化，列类型 dtype_name 则为 `INT` 或 `VARCHAR`。

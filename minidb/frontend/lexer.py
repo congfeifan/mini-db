@@ -14,7 +14,7 @@ KEYWORDS = {kind.value.casefold(): kind for kind in (
 )}
 KEYWORDS.update(dict.fromkeys(
     "update set order by limit asc desc distinct join inner left right outer on as "
-    "group having float bool null true false primary foreign key unique references "
+    "group having count sum avg min max float bool null true false primary foreign key unique references "
     "autoincrement".split(), K.UNSUPPORTED_KEYWORD,
 ))
 # 把 SQL 中的运算符、括号和分隔符映射成解析器能够识别的种别。
@@ -23,6 +23,8 @@ SYMBOLS = {
     "=": K.EQ, "<": K.LT, ">": K.GT, "+": K.PLUS, "-": K.MINUS,
     "*": K.STAR, "/": K.SLASH, "(": K.LPAREN, ")": K.RPAREN,
     ",": K.COMMA, ";": K.SEMICOLON,
+    # 冻结 TokenKind 没有 DOT；扩展前端以保留字种别和原值保存点号。
+    ".": K.UNSUPPORTED_KEYWORD,
 }
 
 

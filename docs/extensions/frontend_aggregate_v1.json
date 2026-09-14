@@ -1,0 +1,21 @@
+{
+  "feature": "aggregate",
+  "version": 1,
+  "payload_fields": ["table", "select_items", "group_by", "where"],
+  "functions": ["COUNT", "SUM", "AVG", "MIN", "MAX"],
+  "valid_examples": [
+    {
+      "sql": "SELECT age,COUNT(*) AS n FROM t GROUP BY age;",
+      "expected": {
+        "table": "t",
+        "select_items": [[null, "age", null], ["COUNT", "*", "n"]],
+        "group_by": ["age"],
+        "where": null
+      }
+    }
+  ],
+  "invalid_examples": [
+    {"sql": "SELECT SUM(*) FROM t;", "code": "INVALID_AGGREGATE_ARGUMENT", "unexpected": "*"},
+    {"sql": "SELECT COUNT() FROM t;", "code": "UNEXPECTED_TOKEN", "unexpected": ")"}
+  ]
+}

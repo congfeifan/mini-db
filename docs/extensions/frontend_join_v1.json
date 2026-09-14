@@ -1,0 +1,22 @@
+{
+  "feature": "join",
+  "version": 1,
+  "payload_fields": ["left", "right", "join_type", "on", "columns", "where"],
+  "valid_examples": [
+    {
+      "sql": "SELECT s.id,c.name FROM student AS s JOIN class c ON s.cid=c.id;",
+      "expected": {
+        "left": ["student", "s"],
+        "right": ["class", "c"],
+        "join_type": "INNER",
+        "columns": ["s.id", "c.name"],
+        "on": "s.cid=c.id",
+        "where": null
+      }
+    }
+  ],
+  "invalid_examples": [
+    {"sql": "SELECT s.id FROM s JOIN c;", "code": "UNEXPECTED_TOKEN", "unexpected": ";"},
+    {"sql": "SELECT * FROM s LEFT JOIN c ON s.id=c.id;", "code": "UNSUPPORTED_JOIN_TYPE", "unexpected": "LEFT"}
+  ]
+}

@@ -1,13 +1,13 @@
 """核心 SQL 的手写递归下降 Parser，以及无状态 FrontendPort 实现。"""
 
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, fields, replace
 
 from minidb.contracts.ast import (
     BinaryExpr, ColumnDef, CreateTableStmt, DeleteStmt, Expr, Identifier,
     InsertStmt, Literal, SelectStmt, Statement, UnaryExpr,
 )
-from minidb.contracts.errors import MiniDBError, SyntaxError
+from minidb.contracts.errors import LexicalError, MiniDBError, SyntaxError
 from minidb.contracts.extensions import ExtensionStatement
 from minidb.contracts.results import TraceEvent
 from minidb.contracts.source import Span
@@ -26,8 +26,83 @@ LITERAL_START = (K.INTEGER, K.MINUS, K.STRING, K.FLOAT)
 PRIMARY_START = (K.IDENTIFIER, *LITERAL_START, K.LPAREN)
 EXPRESSION_START = (*PRIMARY_START, K.NOT)
 STATEMENT_START = (K.CREATE, K.INSERT, K.SELECT, K.DELETE)
-SUPPORTED_EXTENSIONS = frozenset({"update", "order_limit", "distinct"})
+SUPPORTED_EXTENSIONS = frozenset({
+    "update", "order_limit", "distinct", "join", "aggregate", "types", "arithmetic",
+})
 ParsedStatement = Statement | ExtensionStatement
+
+
+@dataclass(frozen=True)
+class QualifiedIdentifier:
+    """仅在 JOIN 扩展内部使用；公共输出会立即转换为 NodeJSON。"""
+
+    qualifier: str
+    name: str
+    span: Span
+
+
+@dataclass(frozen=True)
+class RecoveredStatement:
+    statement_index: int
+    statement: ParsedStatement
+
+
+@dataclass(frozen=True)
+class RecoveryDiagnostic:
+    statement_index: int
+    error: MiniDBError
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    statements: tuple[RecoveredStatement, ...]
+    errors: tuple[RecoveryDiagnostic, ...]
+    truncated: bool = False
+
+
+def _extension_node_data(node: object) -> object:
+    """编码核心 AST 和前端私有限定名，不把 Python 对象放入 payload。"""
+    node_types = (
+        Literal, Identifier, UnaryExpr, BinaryExpr, ColumnDef,
+        CreateTableStmt, InsertStmt, SelectStmt, DeleteStmt, ExtensionStatement,
+        QualifiedIdentifier,
+    )
+    result = [None]
+    pending = [(node, result, 0)]
+    while pending:
+        value, parent, key = pending.pop()
+        if isinstance(value, node_types):
+            record = {
+                "kind": type(value).__name__,
+                "fields": {},
+                "span": {
+                    "start": {"offset": value.span.start.offset, "line": value.span.start.line,
+                              "column": value.span.start.column},
+                    "end": {"offset": value.span.end.offset, "line": value.span.end.line,
+                            "column": value.span.end.column},
+                },
+            }
+            parent[key] = record
+            names = [field.name for field in fields(value) if field.name != "span"]
+            for name in names:
+                record["fields"][name] = None
+            for name in reversed(names):
+                pending.append((getattr(value, name), record["fields"], name))
+        elif isinstance(value, dict):
+            target = {name: None for name in value}
+            parent[key] = target
+            for name, child in reversed(list(value.items())):
+                pending.append((child, target, name))
+        elif isinstance(value, (list, tuple)):
+            target = [None] * len(value)
+            parent[key] = target
+            for index in reversed(range(len(value))):
+                pending.append((value[index], target, index))
+        elif value is None or type(value) in (str, int, float, bool):
+            parent[key] = value
+        else:
+            raise TypeError(f"扩展节点含不支持的字段类型：{type(value).__name__}")
+    return result[0]
 
 
 def _extension_set(features: Collection[str]) -> frozenset[str]:
@@ -58,6 +133,9 @@ class Parser:
         self.nesting = 0
         self.max_nesting = max_nesting
         self.enabled_extensions = _extension_set(enabled_extensions)
+        self.allow_qualified = False
+        self._uses_types = False
+        self._uses_arithmetic = False
 
     def peek(self) -> Token:
         return self.tokens[self.index]
@@ -110,26 +188,97 @@ class Parser:
             statements.append(statement)
         return statements
 
+    def synchronize(self) -> None:
+        """丢弃当前错误语句并停在下一条语句开头。"""
+        if self.peek().kind == K.EOF:
+            return
+        if self.peek().kind == K.SEMICOLON:
+            self.consume()
+            return
+        # 至少消费一个 Token，防止恢复循环在同一错误位置反复报告。
+        self.consume()
+        while self.peek().kind not in (K.SEMICOLON, K.EOF):
+            self.consume()
+        if self.peek().kind == K.SEMICOLON:
+            self.consume()
+
+    def parse_recovering(self, *, max_errors: int = 20) -> RecoveryResult:
+        if type(max_errors) is not int or max_errors < 1:
+            raise ValueError("max_errors 必须为正整数")
+        statements = []
+        errors = []
+        statement_index = 0
+        truncated = False
+        while self.peek().kind != K.EOF:
+            if self.peek().kind == K.SEMICOLON:
+                self.consume()
+                continue
+            statement_index += 1
+            try:
+                statement = self.parse_statement()
+                if self.peek().kind not in (K.SEMICOLON, K.EOF):
+                    raise self._unexpected((K.SEMICOLON, K.EOF),
+                                           reason="语句之间需要分号，不支持额外后缀")
+            except SyntaxError as error:
+                errors.append(RecoveryDiagnostic(statement_index, error))
+                if len(errors) >= max_errors:
+                    truncated = True
+                    break
+                self.synchronize()
+                continue
+            statements.append(RecoveredStatement(statement_index, statement))
+            if self.peek().kind == K.SEMICOLON:
+                self.consume()
+        return RecoveryResult(tuple(statements), tuple(errors), truncated)
+
     def parse_statement(self) -> ParsedStatement:
+        self._uses_types = False
+        self._uses_arithmetic = False
         if self._at_word("update"):
             self._require_extension("update")
-            return self.parse_update()
-        # 根据语句的第一个关键字分派到对应的递归下降入口。
-        methods = {
-            K.CREATE: self.parse_create_table,
-            K.INSERT: self.parse_insert,
-            K.SELECT: self.parse_select,
-            K.DELETE: self.parse_delete,
-        }
-        method = methods.get(self.peek().kind)
-        if method is None:
-            raise self._unexpected(STATEMENT_START, reason="核心仅支持 CREATE、INSERT、SELECT、DELETE")
-        return method()
+            statement = self.parse_update()
+        else:
+            # 根据语句的第一个关键字分派到对应的递归下降入口。
+            methods = {
+                K.CREATE: self.parse_create_table,
+                K.INSERT: self.parse_insert,
+                K.SELECT: self.parse_select,
+                K.DELETE: self.parse_delete,
+            }
+            method = methods.get(self.peek().kind)
+            if method is None:
+                raise self._unexpected(STATEMENT_START, reason="核心仅支持 CREATE、INSERT、SELECT、DELETE")
+            statement = method()
+        return self._wrap_detected_extension(statement)
 
     def _at_word(self, word: str) -> bool:
         # 复用既有保留字种别，不新增/改动冻结 TokenKind；字符串值不会误匹配。
         token = self.peek()
         return token.kind == K.UNSUPPORTED_KEYWORD and token.value == word
+
+    def _at_dot(self) -> bool:
+        return self.peek().kind == K.UNSUPPORTED_KEYWORD and self.peek().value == "."
+
+    def _statement_contains_word(self, words: set[str]) -> bool:
+        for token in self.tokens[self.index:]:
+            if token.kind in (K.SEMICOLON, K.EOF):
+                return False
+            if token.kind == K.UNSUPPORTED_KEYWORD and token.value in words:
+                return True
+        return False
+
+    def _wrap_detected_extension(self, statement: ParsedStatement) -> ParsedStatement:
+        detected = [name for name, used in (
+            ("types", self._uses_types), ("arithmetic", self._uses_arithmetic)
+        ) if used]
+        if not detected:
+            return statement
+        if len(detected) > 1 or isinstance(statement, ExtensionStatement):
+            raise self._unexpected((K.SEMICOLON, K.EOF), code="UNSUPPORTED_COMBINATION",
+                                   reason="当前 v1 扩展不能在同一语句中嵌套组合")
+        feature = detected[0]
+        return ExtensionStatement(feature, 1, {"statement": _extension_node_data(statement)},
+                                  statement.span)
 
     def _expect_word(self, word: str) -> Token:
         if not self._at_word(word):
@@ -138,7 +287,7 @@ class Parser:
 
     def _require_extension(self, feature: str) -> None:
         if feature not in self.enabled_extensions:
-            raise self._unexpected((), code="EXTENSION_DISABLED",
+            raise self._unexpected((feature.upper(),), code="EXTENSION_DISABLED",
                                    reason=f"扩展 {feature} 未启用，请显式配置 enabled_extensions")
 
     def parse_assignment(self) -> dict:
@@ -168,6 +317,15 @@ class Parser:
         token = self.expect(K.IDENTIFIER)
         return Identifier(token.value, token.span)
 
+    def parse_column_ref(self) -> Identifier | QualifiedIdentifier:
+        qualifier = self.parse_identifier()
+        if not self._at_dot():
+            return qualifier
+        self.consume()
+        name = self.parse_identifier()
+        return QualifiedIdentifier(qualifier.name, name.name,
+                                   Span(qualifier.span.start, name.span.end))
+
     def _comma_list(self, item: Callable, terminators: tuple[K, ...]) -> tuple:
         """至少一项；缺分隔符时同时报告逗号和可能的结束符。"""
         items = [item()]
@@ -184,8 +342,15 @@ class Parser:
     def parse_column_def(self) -> ColumnDef:
         # 一项列定义由“列名 + 类型”组成，基础存储类型只有 INT、VARCHAR。
         name = self.parse_identifier()
-        dtype = self.expect(K.INT, K.VARCHAR)
-        return ColumnDef(name, dtype.kind.value, Span(name.span.start, dtype.span.end))
+        if self._at_word("float") or self._at_word("bool"):
+            self._require_extension("types")
+            dtype = self.consume()
+            self._uses_types = True
+            dtype_name = dtype.value.upper()
+        else:
+            dtype = self.expect(K.INT, K.VARCHAR)
+            dtype_name = dtype.kind.value
+        return ColumnDef(name, dtype_name, Span(name.span.start, dtype.span.end))
 
     def parse_create_table(self) -> CreateTableStmt:
         # 按 CREATE TABLE 表名(列定义,...) 的顺序消费输入并构造建表节点。
@@ -198,6 +363,12 @@ class Parser:
         return CreateTableStmt(name, columns, self._span_since(first))
 
     def parse_literal(self) -> Literal:
+        if any(self._at_word(word) for word in ("true", "false", "null")):
+            self._require_extension("types")
+            token = self.consume()
+            self._uses_types = True
+            value = {"true": True, "false": False, "null": None}[token.value]
+            return Literal(value, token.span)
         token = self.expect(*LITERAL_START)
         if token.kind == K.MINUS:
             # 负整数由负号和整数 Token 合并，节点位置同时覆盖负号和数字。
@@ -237,6 +408,27 @@ class Parser:
 
     def parse_select(self) -> SelectStmt | ExtensionStatement:
         first = self.expect(K.SELECT)
+        join_words = {"join", "inner", "left", "right", "outer"}
+        if self._statement_contains_word(join_words) and "join" not in self.enabled_extensions:
+            # 报错位置指向扩展触发词，而不是触发词之前的限定名点号。
+            for index in range(self.index, len(self.tokens)):
+                token = self.tokens[index]
+                if token.kind == K.UNSUPPORTED_KEYWORD and token.value in join_words:
+                    self.index = index
+                    break
+            self._require_extension("join")
+        if self._statement_contains_word(join_words):
+            return self.parse_join(first)
+        aggregate_words = {"count", "sum", "avg", "min", "max", "group", "as"}
+        if self._statement_contains_word(aggregate_words) and "aggregate" not in self.enabled_extensions:
+            for index in range(self.index, len(self.tokens)):
+                token = self.tokens[index]
+                if token.kind == K.UNSUPPORTED_KEYWORD and token.value in aggregate_words:
+                    self.index = index
+                    break
+            self._require_extension("aggregate")
+        if self._statement_contains_word(aggregate_words):
+            return self.parse_aggregate(first)
         distinct = self._at_word("distinct")
         if distinct:
             self._require_extension("distinct")
@@ -262,6 +454,102 @@ class Parser:
             return ExtensionStatement("distinct", 1, {"query": ast_to_data(query)},
                                       self._span_since(first))
         return query
+
+    def parse_table_ref(self) -> dict:
+        table = self.parse_identifier()
+        alias = None
+        if self._at_word("as"):
+            self.consume()
+            alias = self.parse_identifier()
+        elif self.peek().kind == K.IDENTIFIER:
+            alias = self.parse_identifier()
+        if alias is None:
+            alias = Identifier(table.name, table.span)
+        return {"table": _extension_node_data(table), "alias": _extension_node_data(alias)}
+
+    def parse_join_projection(self) -> list[dict] | None:
+        if self.peek().kind == K.STAR:
+            self.consume()
+            return None
+        return list(self._comma_list(self.parse_column_ref, (K.FROM,)))
+
+    def parse_join(self, first: Token) -> ExtensionStatement:
+        if self._at_word("distinct"):
+            raise self._unexpected((K.IDENTIFIER, K.STAR), code="UNSUPPORTED_COMBINATION",
+                                   reason="join v1 不支持 DISTINCT 组合")
+        columns = self.parse_join_projection()
+        self.expect(K.FROM)
+        left = self.parse_table_ref()
+        if any(self._at_word(word) for word in ("left", "right", "outer")):
+            raise self._unexpected(("INNER", "JOIN"), code="UNSUPPORTED_JOIN_TYPE",
+                                   reason="join v1 只支持两表 INNER JOIN")
+        if self._at_word("inner"):
+            self.consume()
+        self._expect_word("join")
+        right = self.parse_table_ref()
+        self._expect_word("on")
+        self.allow_qualified = True
+        try:
+            on = self.parse_expression()
+            where = self.parse_where_optional()
+        finally:
+            self.allow_qualified = False
+        if self._at_word("join") or self._at_word("inner"):
+            raise self._unexpected((K.SEMICOLON, K.EOF), code="UNSUPPORTED_JOIN_CHAIN",
+                                   reason="join v1 只允许连接两张表")
+        return ExtensionStatement("join", 1, {
+            "left": left,
+            "right": right,
+            "join_type": "INNER",
+            "on": _extension_node_data(on),
+            "columns": _extension_node_data(columns),
+            "where": _extension_node_data(where),
+        }, self._span_since(first))
+
+    def parse_select_item(self) -> dict:
+        functions = {"count", "sum", "avg", "min", "max"}
+        function = None
+        if any(self._at_word(name) for name in functions):
+            function = self.consume().value.upper()
+            self.expect(K.LPAREN)
+            if self.peek().kind == K.STAR:
+                if function != "COUNT":
+                    raise self._unexpected((K.IDENTIFIER,), code="INVALID_AGGREGATE_ARGUMENT",
+                                           reason="只有 COUNT 支持星号参数")
+                self.consume()
+                column = "*"
+            else:
+                column = _extension_node_data(self.parse_identifier())
+            self.expect(K.RPAREN)
+        else:
+            column = _extension_node_data(self.parse_identifier())
+        alias = None
+        if self._at_word("as"):
+            self.consume()
+            alias = _extension_node_data(self.parse_identifier())
+        return {"function": function, "column": column, "alias": alias}
+
+    def parse_aggregate(self, first: Token) -> ExtensionStatement:
+        if self._at_word("distinct"):
+            raise self._unexpected((K.IDENTIFIER, "COUNT", "SUM", "AVG", "MIN", "MAX"),
+                                   code="UNSUPPORTED_COMBINATION",
+                                   reason="aggregate v1 不支持 DISTINCT 组合")
+        items = list(self._comma_list(self.parse_select_item, (K.FROM,)))
+        self.expect(K.FROM)
+        table = self.parse_identifier()
+        where = self.parse_where_optional()
+        group_by = []
+        if self._at_word("group"):
+            self.consume()
+            self._expect_word("by")
+            group_by = list(self._comma_list(self.parse_identifier,
+                                             (K.SEMICOLON, K.EOF)))
+        return ExtensionStatement("aggregate", 1, {
+            "table": _extension_node_data(table),
+            "select_items": items,
+            "group_by": _extension_node_data(group_by),
+            "where": _extension_node_data(where),
+        }, self._span_since(first))
 
     def parse_order_terms(self) -> list[dict]:
         from .formatter import ast_to_data
@@ -337,7 +625,9 @@ class Parser:
         prefixes = []
         while self.peek().kind == K.NOT:
             prefixes.append(self.consume())
-        if self.peek().kind not in PRIMARY_START:
+        arithmetic_prefix = self.peek().kind in (K.PLUS, K.MINUS) and "arithmetic" in self.enabled_extensions
+        extended_literal = any(self._at_word(word) for word in ("true", "false", "null"))
+        if self.peek().kind not in PRIMARY_START and not arithmetic_prefix and not extended_literal:
             raise self._unexpected(EXPRESSION_START)
         # 先得到完整比较，再包上 NOT：NOT age=18 应是 NOT(age=18)。
         operand = self.parse_comparison()
@@ -346,10 +636,11 @@ class Parser:
         return operand
 
     def parse_comparison(self) -> Expr:
-        left = self.parse_primary()
+        parse_operand = self.parse_additive if "arithmetic" in self.enabled_extensions else self.parse_primary
+        left = parse_operand()
         if self.peek().kind in COMPARISONS:
             operator = self.consume()
-            right = self.parse_primary()
+            right = parse_operand()
             left = BinaryExpr(COMPARISONS[operator.kind], left, right,
                               Span(left.span.start, right.span.end))
             if self.peek().kind in COMPARISONS:
@@ -358,11 +649,37 @@ class Parser:
                                        code="CHAINED_COMPARISON", reason="不支持链式比较")
         return left
 
+    def parse_additive(self) -> Expr:
+        left = self.parse_multiplicative()
+        while self.peek().kind in (K.PLUS, K.MINUS):
+            operator = self.consume()
+            right = self.parse_multiplicative()
+            self._uses_arithmetic = True
+            left = BinaryExpr(operator.value, left, right, Span(left.span.start, right.span.end))
+        return left
+
+    def parse_multiplicative(self) -> Expr:
+        left = self.parse_unary()
+        while self.peek().kind in (K.STAR, K.SLASH):
+            operator = self.consume()
+            right = self.parse_unary()
+            self._uses_arithmetic = True
+            left = BinaryExpr(operator.value, left, right, Span(left.span.start, right.span.end))
+        return left
+
+    def parse_unary(self) -> Expr:
+        if self.peek().kind in (K.PLUS, K.MINUS):
+            operator = self.consume()
+            operand = self.parse_unary()
+            self._uses_arithmetic = True
+            return UnaryExpr(operator.value, operand, Span(operator.span.start, operand.span.end))
+        return self.parse_primary()
+
     def parse_primary(self) -> Expr:
         kind = self.peek().kind
         if kind == K.IDENTIFIER:
-            return self.parse_identifier()
-        if kind in LITERAL_START:
+            return self.parse_column_ref() if self.allow_qualified else self.parse_identifier()
+        if kind in LITERAL_START or any(self._at_word(word) for word in ("true", "false", "null")):
             return self.parse_literal()
         if kind == K.LPAREN:
             if self.nesting >= self.max_nesting:
@@ -400,3 +717,22 @@ class Frontend:
             # 只有整个脚本解析成功后才输出 AST，避免把部分成功误当全部成功。
             self.on_trace(TraceEvent("AST", format_ast(statements)))
         return statements
+
+    def parse_recovering(self, source: str, *, max_errors: int = 20) -> RecoveryResult:
+        """面向编辑器诊断的恢复入口；结果不会自动进入执行器。"""
+        try:
+            tokens = Lexer(source).tokenize()
+        except LexicalError as error:
+            # 未闭合字符串或注释无法可靠找到后续语句边界，因此立即停止。
+            statement_index = source[:error.span.start.offset].count(";") + 1
+            return RecoveryResult((), (RecoveryDiagnostic(statement_index, error),), True)
+        return Parser(tokens, enabled_extensions=self.enabled_extensions).parse_recovering(
+            max_errors=max_errors
+        )
+
+
+def parse_recovering(source: str, *, max_errors: int = 20,
+                     enabled_extensions: Collection[str] = ()) -> RecoveryResult:
+    return Frontend(enabled_extensions=enabled_extensions).parse_recovering(
+        source, max_errors=max_errors
+    )

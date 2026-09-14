@@ -1,0 +1,9 @@
+{
+  "feature": "fuzzing",
+  "version": 1,
+  "location": "tests/frontend/fuzz_support.py",
+  "generator": {"seed": 2026, "count": 200, "max_expression_depth": 4},
+  "failure_categories": ["Crash", "Wrong Accept", "Wrong Reject", "Position Error"],
+  "mutations": ["remove_from", "unterminated_string"],
+  "minimizer": {"input": "xxBADyy", "predicate": "contains BAD", "expected": "BAD"}
+}

@@ -1,0 +1,20 @@
+{
+  "feature": "grammar_tooling",
+  "version": 1,
+  "epsilon": "ε",
+  "eof": "EOF",
+  "grammar_format": {"Nonterminal": [["symbol", "symbol"], ["ε"]]},
+  "valid_examples": [
+    {
+      "grammar": {"S": [["A", "B"]], "A": [["a"], ["ε"]], "B": [["b"]]},
+      "start": "S",
+      "nullable": ["A"],
+      "first_S": ["a", "b"],
+      "follow_A": ["b"],
+      "conflicts": []
+    }
+  ],
+  "conflict_examples": [
+    {"grammar": {"S": [["a", "A"], ["a", "B"]], "A": [["x"]], "B": [["y"]]}, "cell": ["S", "a"]}
+  ]
+}

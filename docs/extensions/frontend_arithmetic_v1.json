@@ -1,0 +1,14 @@
+{
+  "feature": "arithmetic",
+  "version": 1,
+  "payload_fields": ["statement"],
+  "precedence": ["unary + -", "* /", "+ -", "comparison", "NOT", "AND", "OR"],
+  "valid_examples": [
+    {"sql": "SELECT * FROM t WHERE age>10+2*4;", "expected_shape": ">(age,+(10,*(2,4)))"},
+    {"sql": "SELECT * FROM t WHERE id=8/2/2;", "expected_shape": "=(id,/(/(8,2),2))"}
+  ],
+  "invalid_examples": [
+    {"sql": "SELECT * FROM t WHERE id=1+;", "code": "UNEXPECTED_TOKEN", "unexpected": ";"},
+    {"sql": "SELECT * FROM t WHERE id=*2;", "code": "UNEXPECTED_TOKEN", "unexpected": "*"}
+  ]
+}

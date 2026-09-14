@@ -1,6 +1,6 @@
 # MiniDB 成员 A SQL 前端
 
-已实现实施手册的 A-B01 至 A-B06，以及 A-E01（UPDATE）、A-E02（ORDER BY/LIMIT）、A-E03（DISTINCT）前端扩展。提供词法分析、递归下降解析、WHERE 布尔表达式、精确错误位置、多语句和 Token/AST 输出。当前成果只负责 SQL 到 AST，不执行查询、不写数据库；B/C/D 模块留给对应成员。
+已实现实施手册的 A-B01 至 A-B06，以及成员 A 的 A-E01 至 A-E10 全部前端扩展。除 UPDATE、ORDER BY/LIMIT、DISTINCT 外，还包括两表 INNER JOIN、GROUP BY 与聚合、FLOAT/BOOL/NULL、算术表达式、Panic Mode 错误恢复、FIRST/FOLLOW/LL(1) 分析工具和可复现 SQL Fuzz。当前成果只负责 SQL 到 AST 或扩展 JSON，不执行查询、不写数据库；B/C/D 模块留给对应成员。
 
 ## 本机运行
 
@@ -29,9 +29,10 @@ $env:PYTHONUTF8 = '1'
 
 ```powershell
 .\.venv\Scripts\python.exe -m demo.frontend_demo --file demo/extensions.sql --enable update --enable order_limit --enable distinct
+.\.venv\Scripts\python.exe -m demo.frontend_demo --file demo/remaining_extensions.sql --enable join --enable aggregate --enable types --enable arithmetic
 ```
 
-该文件分别产生 update、order_limit、distinct 三个 ExtensionStatement。三种扩展可在同一脚本的不同语句中使用；DISTINCT 与排序/LIMIT 在同一条语句中组合尚未定义，明确拒绝。
+两个演示文件覆盖七种语法扩展。扩展可在同一脚本的不同语句中使用；没有公共 v1 协议的同句扩展组合会明确拒绝。错误恢复通过 `Frontend.parse_recovering` 单独调用，文法工具位于 `minidb/frontend/grammar_analysis.py`，Fuzz 工具仅位于测试目录。
 
 ## 换电脑
 
@@ -53,8 +54,9 @@ Linux 使用 `python3.14 -m venv .venv` 和 `.venv/bin/python`。本次只在 Wi
 - `minidb/frontend/formatter.py`：A-B06，稳定 Token/AST JSON。
 - `demo/frontend_gui.py`：持续运行的桌面图形演示，提供 SQL 输入和 Token/AST/错误输出。
 - `tests/frontend/test_a_b01.py` 至 `test_a_b06.py`：逐任务断言及边界回归。
-- `tests/frontend/test_a_e01.py` 至 `test_a_e03.py`：扩展 payload、开关、源码位置和核心兼容回归。
-- `docs/extensions/README.md` 与三个 `frontend_*_v1.json`：扩展接口、示例和整合依赖。
+- `tests/frontend/test_a_e01.py` 至 `test_a_e10.py`：十项扩展的结构、错误和工具验收。
+- `minidb/frontend/grammar_analysis.py`：nullable、FIRST、FOLLOW、预测表和冲突诊断。
+- `docs/extensions/README.md` 与十个 `frontend_*_v1.json`：扩展接口、示例和整合依赖。
 - `docs/grammar.md`：核心文法、位置、语义边界和资源限制。
 - `docs/INTERFACES.md`：交给成员 B 和整合层的接口。
 - `docs/walkthrough/member_a.md`：真实代码讲解与理解练习。
@@ -64,9 +66,9 @@ Linux 使用 `python3.14 -m venv .venv` 和 `.venv/bin/python`。本次只在 Wi
 
 开始时目录没有手册要求的共同基线。本次为完成 A 的基础部分，在 `minidb/contracts` 初始化了必要的 Token、AST、Span、错误、TraceEvent 和 FrontendPort；这是**前端最小基线**，不是完整四人项目初始化。没有生成 68 项全组任务框架或 B/C/D 代码。`contracts.sha256` 固定本次快照，整合前应由四人统一采用或显式对照现有团队基线。
 
-本次初始化公共文件和演示脚本是补齐缺失前置；后续成员 A 开发遵循手册范围，只改前端、对应测试、个人 walkthrough 和 delivery。没有执行 Git 提交或推送。
+本次初始化公共文件和演示脚本是补齐缺失前置；后续成员 A 开发遵循手册范围，只改前端、对应测试、个人 walkthrough 和 delivery。代码按用户明确要求提交到 `feature/member-a-frontend` 分支。
 
-A-E01 至 A-E03 阶段另补齐了手册规定但最小基线缺失的 `ExtensionStatement` 容器。原 7 个核心契约文件保持不变，旧清单保存在 `docs/extensions/contracts.core-v1.sha256`；最新清单新增 `extensions.py`，整合前需统一。详情见扩展说明。
+A-E01 至 A-E10 阶段使用手册规定的 `ExtensionStatement` 容器。原 7 个核心契约文件保持不变，旧清单保存在 `docs/extensions/contracts.core-v1.sha256`；最新清单新增 `extensions.py`，整合前需统一。详情见扩展说明。
 
 ## 验收状态
 

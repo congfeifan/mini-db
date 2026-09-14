@@ -1,0 +1,18 @@
+{
+  "feature": "error_recovery",
+  "version": 1,
+  "entry": "Frontend.parse_recovering(source, max_errors=20)",
+  "result_fields": ["statements", "errors", "truncated"],
+  "valid_examples": [
+    {
+      "sql": "SELECT FROM t; SELECT id FROM t;",
+      "expected_statement_indices": [2],
+      "expected_error_indices": [1],
+      "truncated": false
+    }
+  ],
+  "invalid_examples": [
+    {"sql": "SELECT id FROM", "expected_errors": 1, "expected_statements": 0},
+    {"sql": "SELECT; DELETE;", "max_errors": 1, "truncated": true}
+  ]
+}
