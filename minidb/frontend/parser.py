@@ -1,13 +1,13 @@
 """核心 SQL 的手写递归下降 Parser，以及无状态 FrontendPort 实现。"""
 
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from minidb.contracts.ast import (
     BinaryExpr, ColumnDef, CreateTableStmt, DeleteStmt, Expr, Identifier,
     InsertStmt, Literal, SelectStmt, Statement, UnaryExpr,
 )
-from minidb.contracts.errors import MiniDBError, SyntaxError
+from minidb.contracts.errors import LexicalError, MiniDBError, SyntaxError
 from minidb.contracts.extensions import ExtensionStatement
 from minidb.contracts.results import TraceEvent
 from minidb.contracts.source import Span
@@ -27,6 +27,31 @@ EXPRESSION_START = (*PRIMARY_START, K.NOT)
 STATEMENT_START = (K.CREATE, K.INSERT, K.SELECT, K.DELETE)
 SUPPORTED_EXTENSIONS = frozenset({"update", "order_limit", "distinct"})
 ParsedStatement = Statement | ExtensionStatement
+
+
+@dataclass(frozen=True)
+class RecoveredStatement:
+    """一条恢复成功的语句及其在原脚本中的序号。"""
+
+    statement_index: int
+    statement: ParsedStatement
+
+
+@dataclass(frozen=True)
+class RecoveryDiagnostic:
+    """一条失败语句的序号和原始领域错误。"""
+
+    statement_index: int
+    error: MiniDBError
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    """恢复解析结果；成功语句不会自动进入执行器。"""
+
+    statements: tuple[RecoveredStatement, ...]
+    errors: tuple[RecoveryDiagnostic, ...]
+    truncated: bool = False
 
 
 def _extension_set(features: Collection[str]) -> frozenset[str]:
@@ -108,6 +133,52 @@ class Parser:
                 raise self._unexpected((K.SEMICOLON, K.EOF), reason="语句之间需要分号，不支持额外后缀")
             statements.append(statement)
         return statements
+
+    def synchronize(self) -> None:
+        """丢弃当前错误语句，并停在下一条非空语句的开头。"""
+        if self.peek().kind == K.EOF:
+            return
+        if self.peek().kind == K.SEMICOLON:
+            self.consume()
+            return
+        # 至少消费一个 Token，防止恢复循环反复遇到同一个错误位置。
+        self.consume()
+        while self.peek().kind not in (K.SEMICOLON, K.EOF):
+            self.consume()
+        if self.peek().kind == K.SEMICOLON:
+            self.consume()
+
+    def parse_recovering(self, *, max_errors: int = 20) -> RecoveryResult:
+        """按分号恢复语法错误，保留成功语句、诊断和原语句序号。"""
+        if type(max_errors) is not int or max_errors < 1:
+            raise ValueError("max_errors 必须为正整数")
+        statements = []
+        errors = []
+        statement_index = 0
+        truncated = False
+        while self.peek().kind != K.EOF:
+            if self.peek().kind == K.SEMICOLON:
+                self.consume()
+                continue
+            statement_index += 1
+            try:
+                statement = self.parse_statement()
+                if self.peek().kind not in (K.SEMICOLON, K.EOF):
+                    raise self._unexpected(
+                        (K.SEMICOLON, K.EOF),
+                        reason="语句之间需要分号，不支持额外后缀",
+                    )
+            except SyntaxError as error:
+                errors.append(RecoveryDiagnostic(statement_index, error))
+                if len(errors) >= max_errors:
+                    truncated = True
+                    break
+                self.synchronize()
+                continue
+            statements.append(RecoveredStatement(statement_index, statement))
+            if self.peek().kind == K.SEMICOLON:
+                self.consume()
+        return RecoveryResult(tuple(statements), tuple(errors), truncated)
 
     def parse_statement(self) -> ParsedStatement:
         if self._at_word("update"):
@@ -399,3 +470,17 @@ class Frontend:
             # 只有整个脚本解析成功后才输出 AST，避免把部分成功误当全部成功。
             self.on_trace(TraceEvent("AST", format_ast(statements)))
         return statements
+
+    def parse_recovering(self, source: str, *, max_errors: int = 20) -> RecoveryResult:
+        """返回编辑器诊断结果，不改变核心 parse 的首错停止语义。"""
+        if type(max_errors) is not int or max_errors < 1:
+            raise ValueError("max_errors 必须为正整数")
+        try:
+            tokens = Lexer(source).tokenize()
+        except LexicalError as error:
+            # 未闭合字符串或注释无法可靠定位下一条语句，因此立即停止。
+            statement_index = source[:error.span.start.offset].count(";") + 1
+            diagnostic = RecoveryDiagnostic(statement_index, error)
+            return RecoveryResult((), (diagnostic,), True)
+        parser = Parser(tokens, enabled_extensions=self.enabled_extensions)
+        return parser.parse_recovering(max_errors=max_errors)

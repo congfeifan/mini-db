@@ -156,3 +156,27 @@ OR
 关键测试：`test_a_e03_distinct_projection`、`test_a_e03_distinct_star`、`test_a_e03_double_distinct`、`test_a_e03_core_unchanged` 对应四个任务卡用例；`test_a_e03_duplicate_projection_not_deduplicated` 保留语法证据；`test_a_e03_mixed_batch_trace` 验证混合批次只发一次 TOKEN/AST；`test_a_e03_demo_real_process_and_default_disabled` 验证可运行演示。
 
 本人练习：用 `(a,b)=(1,2),(1,3)` 说明整元组去重与分别对 a/b 去重的区别，再追踪有 WHERE 的 DISTINCT payload。本人理解状态待完成。
+
+## A-E08 Panic Mode 错误恢复
+
+`Frontend.parse_recovering(source, max_errors=20)` 是独立诊断入口。它先完成词法分析，再调用 `Parser.parse_recovering`；核心 `Frontend.parse` 没有改为恢复模式，仍在第一条词法或语法错误处抛出异常，因此恢复结果不会被整合层自动执行。
+
+恢复结果由 `RecoveryResult`、`RecoveredStatement` 和 `RecoveryDiagnostic` 三个本地冻结数据类组成。成功项和错误项分别保存，并携带原脚本中的 `statement_index`；失败语句不会用空 AST 伪装。`truncated` 表示达到错误数量上限或词法错误导致无法安全继续。
+
+`Parser.parse_recovering` 跳过空分号，只在遇到非空语句时增加语句序号。每条语句仍复用原 `parse_statement`，并检查后续 Token 必须是分号或 EOF。这里只捕获契约中的 `SyntaxError`；`RuntimeError`、`IndexError` 等内部缺陷继续向外抛出，避免把程序错误伪装成用户 SQL 错误。
+
+`Parser.synchronize` 在错误后移动到下一分号或 EOF。错误点已经是分号时直接消费分号；错误点在语句内部时先消费至少一个 Token，再循环到边界，并消费同步分号。这个“至少前进一步”的不变量防止外层循环反复遇到同一个 Token 而无限报告同一错误。
+
+例如：
+
+```text
+SELECT FROM t; SELECT id FROM t;
+```
+
+第一句在 `FROM` 处产生一条 `RecoveryDiagnostic(statement_index=1, ...)`；同步消费到第一个分号后，第二句生成 `RecoveredStatement(statement_index=2, SelectStmt(...))`。第二句 AST 的 Span 仍基于完整原文，起始 offset 为 15。
+
+Lexer 在返回 Token 序列前发现未闭合字符串或注释时，没有可靠的后续语句边界。恢复入口因此返回一条词法诊断、空 statements 和 `truncated=True`，不会猜测后续 SQL。`max_errors` 只接受正整数；达到上限立即返回并设置截断标记。
+
+验证：`test_a_e08_recover_next`、`test_a_e08_consecutive_errors`、`test_a_e08_eof_error`、`test_a_e08_core_unchanged`、`test_a_e08_error_limit_and_lexical_stop`、`test_a_e08_reject_invalid_error_limit`、`test_a_e08_does_not_swallow_internal_errors`、`test_a_e08_keeps_enabled_extensions`。专项测试 12 项通过；`tests/contracts tests/frontend` 共 218 项通过。
+
+理解题答案：同步函数必须保证 Token 下标前进，否则恢复入口再次调用同一语句解析时会在相同 Token 产生相同错误，形成无限循环。小修改练习已落实为 `max_errors` 参数；测试使用上限 1，断言只返回一条诊断并设置 `truncated=True`。

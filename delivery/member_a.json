@@ -3,7 +3,7 @@
   "member": "A",
   "feature_group": "CORE_FRONTEND",
   "contract_hash": "e086cafec0a281ca94d3141731d4b227369879ad3345cbae2653cf76f8f1aa3b",
-  "generated_at": "2026-09-14T18:58:21.809071+08:00",
+  "generated_at": "2026-09-16T15:48:22.820307+08:00",
   "completed_tasks": [
     "A-B01",
     "A-B02",
@@ -13,7 +13,8 @@
     "A-B06",
     "A-E01",
     "A-E02",
-    "A-E03"
+    "A-E03",
+    "A-E08"
   ],
   "verified_tasks": [
     "A-B01",
@@ -27,7 +28,8 @@
     "A-E03",
     "contracts-frontend",
     "compileall",
-    "diff-check"
+    "diff-check",
+    "A-E08"
   ],
   "modified_files": [
     "minidb/frontend/lexer.py",
@@ -36,7 +38,9 @@
     "minidb/frontend/__init__.py",
     "tests/frontend",
     "docs/walkthrough/member_a.md",
-    "delivery/member_a.json"
+    "delivery/member_a.json",
+    "tests/frontend/test_a_e08.py",
+    "docs/extensions/frontend_recovery_v1.json"
   ],
   "test_results": [
     {
@@ -50,15 +54,49 @@
         "A-B06",
         "A-E01",
         "A-E02",
-        "A-E03"
+        "A-E03",
+        "A-E08"
       ],
-      "command": "python -m pytest -q tests/contracts tests/frontend"
+      "command": ".\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q -p no:cacheprovider --basetemp D:/big/pytest-tmp-ae08-full tests/contracts tests/frontend"
+    },
+    {
+      "status": "passed",
+      "tasks": [
+        "A-E08"
+      ],
+      "command": ".\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q tests/frontend/test_a_e08.py",
+      "result": "12 passed"
+    },
+    {
+      "status": "passed",
+      "tasks": [
+        "compileall"
+      ],
+      "command": ".\\.venv\\Scripts\\python.exe -X utf8 -m compileall -q minidb",
+      "result": "exit 0"
+    },
+    {
+      "status": "passed",
+      "tasks": [
+        "contract-hash"
+      ],
+      "command": ".\\.venv\\Scripts\\python.exe -X utf8 tools/generate_contract_hash.py --check",
+      "result": "e086cafec0a281ca94d3141731d4b227369879ad3345cbae2653cf76f8f1aa3b"
+    },
+    {
+      "status": "passed",
+      "tasks": [
+        "full-project-regression"
+      ],
+      "command": ".\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q -p no:cacheprovider",
+      "result": "401 passed"
     }
   ],
   "completed_extensions": [
     "A-E01",
     "A-E02",
-    "A-E03"
+    "A-E03",
+    "A-E08"
   ],
   "extensions": {
     "A-E01": {
@@ -87,6 +125,13 @@
       "execution_dependencies": [
         "另行定义B去重计划和D去重算子；现有任务未覆盖"
       ]
+    },
+    "A-E08": {
+      "feature": "error_recovery",
+      "version": 1,
+      "group": "independent_a_e08",
+      "execution_dependencies": [],
+      "execution_policy": "diagnostic_only_not_auto_executed"
     }
   },
   "extensions_enabled_by_default": [],
@@ -119,11 +164,12 @@
     "runtime_dependencies": "standard library only"
   },
   "tests": {
-    "passed": 206,
+    "passed": 218,
     "failed": 0,
     "skipped": 0,
     "junit": "delivery/test-results.xml",
-    "command_log": "delivery/validation.txt"
+    "command_log": "delivery/validation.txt",
+    "command": ".\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q -p no:cacheprovider --basetemp D:/big/pytest-tmp-ae08-full tests/contracts tests/frontend"
   },
   "tasks": [
     {
@@ -432,6 +478,35 @@
         "test_a_e03_snapshot_examples",
         "test_a_e03_demo_real_process_and_default_disabled"
       ]
+    },
+    {
+      "id": "A-E08",
+      "functional_status": "PASS",
+      "understanding_status": "PENDING_MEMBER_REVIEW",
+      "symbols": [
+        "RecoveredStatement",
+        "RecoveryDiagnostic",
+        "RecoveryResult",
+        "Parser.synchronize",
+        "Parser.parse_recovering",
+        "Frontend.parse_recovering"
+      ],
+      "test_file": "tests/frontend/test_a_e08.py",
+      "test_count": 12,
+      "tests": [
+        "test_a_e08_recover_next",
+        "test_a_e08_consecutive_errors",
+        "test_a_e08_eof_error",
+        "test_a_e08_core_unchanged",
+        "test_a_e08_error_limit_and_lexical_stop",
+        "test_a_e08_reject_invalid_error_limit[0]",
+        "test_a_e08_reject_invalid_error_limit[-1]",
+        "test_a_e08_reject_invalid_error_limit[True]",
+        "test_a_e08_reject_invalid_error_limit[1.5]",
+        "test_a_e08_reject_invalid_error_limit[1]",
+        "test_a_e08_does_not_swallow_internal_errors",
+        "test_a_e08_keeps_enabled_extensions"
+      ]
     }
   ],
   "created_files": [
@@ -643,7 +718,9 @@
     "tools/generate_contract_hash.py",
     "tools/record_delivery.py",
     "tools/validate_frontend.py",
-    "tools/validate_integration_inputs.py"
+    "tools/validate_integration_inputs.py",
+    "tests/frontend/test_a_e08.py",
+    "docs/extensions/frontend_recovery_v1.json"
   ],
   "member_owned_paths": [
     "minidb/frontend",
